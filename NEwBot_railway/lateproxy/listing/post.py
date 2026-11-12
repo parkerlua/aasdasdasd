@@ -4,7 +4,7 @@ from __future__ import annotations
 import html
 
 from ..config import Settings
-from ..services.emoji import STAR, emoji_html
+from ..services.emoji import ITEM, STAR, emoji_html
 from .flows import BADGE_GROUPS, Flow, vanity
 
 POST_TITLES = {
@@ -44,11 +44,16 @@ def at(name: str, contact_username: str) -> str:
 
 
 def platform_emoji(flow_key: str) -> str:
-    """Custom emoji in front of the post title: Discord, TikTok or Telegram (nothing for other listings)."""
+    """Custom emoji after the post title: Discord, TikTok or Telegram (nothing for other listings)."""
     for prefix in ("discord", "tiktok", "telegram"):
         if flow_key.startswith(prefix):
-            return emoji_html(f"post_{prefix}", STAR) + " "
+            return emoji_html(f"post_{prefix}", STAR)
     return ""
+
+
+def item_line(text: str) -> str:
+    """A vanity or a badge line, led by the item emoji."""
+    return f"{emoji_html('item_line', ITEM)} {text}"
 
 
 def contact_footer(settings: Settings) -> str:
@@ -77,11 +82,11 @@ def build_post(flow: Flow, data: dict, settings: Settings) -> str:
         names = [html.escape(data.get("gift", ""))]  # plain link, so Telegram shows the gift preview
     elif flow.key == "discord_badge":
         if all_badges(data):
-            bullets.append(badge_line(all_badges(data)))
+            plain_lines.append(item_line(badge_line(all_badges(data))))
     else:
         items = [ln for ln in str(data.get("item", "")).splitlines() if ln.strip()]
         if flow.key == "discord_vanity":  # bold, one per line, no dash
-            plain_lines += [f"<b>{html.escape(vanity(ln))}</b>" for ln in items]
+            plain_lines += [item_line(f"<b>{html.escape(vanity(ln)[len('.gg'):])}</b>") for ln in items]  # emoji = ".gg"
         else:
             bullets += [html.escape(ln) for ln in items]
     if flow.key == "discord_username":
@@ -101,18 +106,28 @@ def build_post(flow: Flow, data: dict, settings: Settings) -> str:
     several = len(names) > 1 or (flow.key == "discord_vanity" and len(plain_lines) > 1)
     title = PLURAL_TITLES[flow.key] if several and flow.key in PLURAL_TITLES else POST_TITLES[flow.key]
     text_only = not data.get("account_image")
-    head = f"{platform_emoji(flow.key)}<b>{title}</b>" + (BLANK * HEAD_PAD if text_only else "")
+    mark = platform_emoji(flow.key)
+    head = f"<b>{title}</b>" + (f" {mark}" if mark else "") + (BLANK * HEAD_PAD if text_only else "")
     if data.get("notes") and flow.key not in NO_NOTES_IN_POST:
         (plain_lines if flow.key == "discord_vanity" else bullets).append(html.escape(data["notes"]))
     co = data.get("co_amount")
     parts = [head]
     if names:
         parts.append("\n".join(names))
-    if plain_lines:
-        parts.append("\n".join(plain_lines))
+    price = f"BIN: {data.get('price')}\nC/O: {'none' if co is None else co}"
+    if plain_lines:  # vanity: the lines, then BIN, together. badge: the badge line, then its "- " lines.
+        block = list(plain_lines)
+        if flow.key == "discord_badge":
+            block += [f"- {b}" for b in bullets]
+            bullets = []
+        if flow.key == "discord_vanity":
+            block.append(price)
+            price = ""
+        parts.append("\n".join(block))
     if bullets:
         parts.append("\n".join(f"- {b}" for b in bullets))
-    parts.append(f"BIN: {data.get('price')}\nC/O: {'none' if co is None else co}")
+    if price:
+        parts.append(price)
     rest = "\n\n".join(parts[1:])
     if text_only:  # title, a full-width invisible line, then the content
         body = f"{head}\n{BLANK * SPACER_PAD}\n{rest}"

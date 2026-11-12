@@ -8,6 +8,7 @@ import json
 
 from ..paths import ICONS_JSON
 
+ITEM = "⚡️"  # plain stand-in for the item_line emoji (a vanity's ".gg", a badge line)
 STAR = "⭐️"  # the exact emoji a custom emoji must wrap, or Telegram ignores it
 
 FALLBACK = {
