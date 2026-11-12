@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 
 from .flows import BADGE_GROUPS, amount
+from ..services.emoji import ITEM
 from .post import DISCORD_ACCOUNTS, PLURAL_TITLES, POST_TITLES, SHORT_BADGES
 
 TITLE_TO_FLOW = {**{v: k for k, v in POST_TITLES.items()}, **{v: k for k, v in PLURAL_TITLES.items()}}
@@ -22,13 +23,16 @@ def parse_post(text: str, image: str | None):
     lines = [ln.replace("⠀", "").strip() for ln in text.splitlines()]
     lines = [ln for ln in lines if ln]
     if lines:
-        lines[0] = re.sub(r"^[^A-Za-z]+", "", lines[0])  # posts start with a platform emoji
+        lines[0] = re.sub(r"^[^A-Za-z]+|[^A-Za-z]+$", "", lines[0])  # platform emoji after the title (before, in old posts)
     if not lines or lines[0] not in TITLE_TO_FLOW:
         return None
     key = TITLE_TO_FLOW[lines[0]]
     names, bullets, link, data = [], [], "", {"notes": None}
+    items = []  # lines led by the item emoji: a vanity ("/late") or a badge line
     for ln in lines[1:]:
-        if ln.startswith("BIN:"):
+        if ln.startswith(ITEM + " "):
+            items.append(ln[len(ITEM) + 1:].strip())
+        elif ln.startswith("BIN:"):
             data["price"] = _num(ln[4:].strip())
         elif ln.startswith("C/O:"):
             v = ln[4:].strip()
@@ -70,9 +74,10 @@ def parse_post(text: str, image: str | None):
                 data["has_rare"], data["rare_badges"] = "Yes", rare
             else:
                 data["has_rare"] = "No"
-        elif extra:
-            data["badges"] = [x.strip() for x in extra[0].split(",")]
-            data["notes"] = ", ".join(extra[1:]) or None
+        elif items or extra:
+            first, rest = (items[0], extra) if items else (extra[0], extra[1:])  # old posts: badges were a "- " line
+            data["badges"] = [x.strip() for x in first.split(",")]
+            data["notes"] = ", ".join(rest) or None
     elif key == "tiktok_username":
         data["username"] = names[0].lstrip("@") if names else ""
         passkey, number = "Passkey" in bullets, "Number" in bullets
@@ -86,7 +91,8 @@ def parse_post(text: str, image: str | None):
         data["notes"] = ", ".join(bullets) or None
     elif key == "discord_vanity":
         # current posts list each vanity on its own line (".gg/x", bold); older ones had a "- " in front
-        found = [ln for ln in [*bullets, *lines[1:]] if re.fullmatch(r"\.?gg/\S+", ln)]
+        found = [f".gg{ln}" for ln in items if re.fullmatch(r"/\S+", ln)]
+        found += [ln for ln in [*bullets, *lines[1:]] if re.fullmatch(r"\.?gg/\S+", ln)]
         data["item"] = "\n".join(dict.fromkeys(found))
     else:
         return None
